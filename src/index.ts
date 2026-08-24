@@ -149,10 +149,10 @@ io.on('connection', (socket: Socket) => {
     // WebRTC Audio Signaling
     socket.on('joinAudioRoom', (roomId: string, userId: string) => {
         socket.broadcast.to(roomId).emit('userJoinedAudio', userId);
+    });
 
-        socket.on('leaveAudioRoom', () => {
-            socket.broadcast.to(roomId).emit('userLeftAudio', userId);
-        });
+    socket.on('leaveAudioRoom', (roomId: string, userId: string) => {
+        socket.broadcast.to(roomId).emit('userLeftAudio', userId);
     });
 
     // Disconnect cleanup

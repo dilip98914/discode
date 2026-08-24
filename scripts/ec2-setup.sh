@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
 # Discode Single EC2 Auto-Bootstrap Script
 # Sets up Docker, Docker Compose, and launches Discode for Mobile & Web Testing.
@@ -35,15 +35,38 @@ fi
 
 cd $DEPLOY_DIR
 
-# 5. Build and launch container stack
+# 5. Ensure .env file exists
+if [ ! -f "$DEPLOY_DIR/.env" ]; then
+    echo "⚙️ Initializing default .env configuration..."
+    if [ -f "$DEPLOY_DIR/.env.example" ]; then
+        cp $DEPLOY_DIR/.env.example $DEPLOY_DIR/.env
+    elif [ -f "$DEPLOY_DIR/.env.production" ]; then
+        cp $DEPLOY_DIR/.env.production $DEPLOY_DIR/.env
+    else
+        cat << 'EOF' > $DEPLOY_DIR/.env
+PORT=8080
+DATABASE_URL=mysql://root:toor@db:3306/discode
+DATABASE_USER=root
+DATABASE_PASSWORD=toor
+DATABASE_NAME=discode
+DATABASE_HOST=db
+DATABASE_PORT=3306
+MAX_DB_CONN=50
+NODE_ENV=production
+MYSQL_LOCAL_PORT=6604
+EOF
+    fi
+fi
+
+# 6. Build and launch container stack
 echo "🏗️ Building and starting Docker containers..."
 sudo docker compose down || true
 sudo docker compose up --build -d
 
-# 6. Fetch Public IP
+# 7. Fetch Public IP
 PUBLIC_IP=$(curl -s http://checkip.amazonaws.com || curl -s ifconfig.me || echo "<YOUR_EC2_PUBLIC_IP>")
 
 echo "=================================================================="
-echo "🎉 DISCODE IS LIVE AND READY FOR TESTING!"
+echo "🎉 DISCODE IS LIVE AND READY FOR COLLABORATION!"
 echo "👉 Open on your PC or Mobile Phone: http://$PUBLIC_IP:8080"
 echo "=================================================================="

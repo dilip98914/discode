@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import { executeCodeLocal } from '../runner/localRunner';
 import { RunnerJob, RunOptions } from '../types';
 

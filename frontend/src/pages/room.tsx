@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { RouteComponentProps, withRouter } from 'react-router';
 import MonacoEditor from '../components/MonacoEditor';
 import FileTree from '../components/FileTree';
@@ -14,7 +14,7 @@ interface RoomProps {
     updatePreviousRooms: (room: string) => any;
 }
 
-let myPeer: Peer;
+let myPeer: Peer | null = null;
 let myAudio: MediaStream | null = null;
 
 const USER_COLORS = ['#ff4d4f', '#40a9ff', '#73d13d', '#9254de', '#ffc53d', '#36cfc9', '#ff7a45'];
@@ -214,7 +214,7 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
             socket.off('setOutput');
             socket.emit('leaveroom', roomId);
         };
-    }, [props.match.params.id, userColor]);
+    }, [props.match.params.id, userColor, props]);
 
     // Handle Cursor Movement
     const handleCursorChange = (pos: { lineNumber: number; column: number }) => {
@@ -308,13 +308,45 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                     .then((stream) => {
                         myAudio = stream;
                         socket.emit('joinAudioRoom', id, userId);
+
+                        if (myPeer) {
+                            myPeer.on('call', (call) => {
+                                call.answer(stream);
+                                call.on('stream', (userAudioStream) => {
+                                    const audio = document.createElement('audio');
+                                    audio.srcObject = userAudioStream;
+                                    audio.play().catch(() => {});
+                                });
+                            });
+                        }
                     })
                     .catch(() => alert('Microphone access denied'));
             });
 
+            const handleUserJoinedAudio = (remotePeerId: string) => {
+                if (myAudio && myPeer) {
+                    const call = myPeer.call(remotePeerId, myAudio);
+                    call.on('stream', (userAudioStream) => {
+                        const audio = document.createElement('audio');
+                        audio.srcObject = userAudioStream;
+                        audio.play().catch(() => {});
+                    });
+                }
+            };
+
+            socket.on('userJoinedAudio', handleUserJoinedAudio);
+
             return () => {
-                if (myPeer) myPeer.destroy();
-                if (myAudio) myAudio.getTracks().forEach((t) => t.stop());
+                socket.off('userJoinedAudio', handleUserJoinedAudio);
+                socket.emit('leaveAudioRoom', id);
+                if (myPeer) {
+                    myPeer.destroy();
+                    myPeer = null;
+                }
+                if (myAudio) {
+                    myAudio.getTracks().forEach((t) => t.stop());
+                    myAudio = null;
+                }
             };
         }
     }, [inAudio, id]);

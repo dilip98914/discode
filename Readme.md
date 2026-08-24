@@ -1,4 +1,4 @@
-﻿# Discode 🚀
+# Discode 🚀
 > Production-Grade Real-Time Collaborative IDE with Monaco (VS Code Engine), Zero-Collision Real-Time Sync, Visible Multi-Cursor Name Flags, Live Presence, 6-Language Local Sandbox Runner, Strictly Sequential 30-Day Audit History, Self-Hosted WebRTC Voice, and Complete AWS Deployment Guides.
 
 Discode empowers engineering teams, students, and interviewers to code together in real time with the power of the **Monaco Editor (VS Code engine)**, multi-file project workspaces, colored collaborative cursors with name flags, live voice channels, local sandbox execution across **6 programming languages**, and complete 30-day code attribution traceability.
@@ -15,7 +15,11 @@ Discode empowers engineering teams, students, and interviewers to code together 
 7. [Multi-File Workspace & Export](#-multi-file-workspace--export)
 8. [Strictly Sequential 30-Day Code History](#-strictly-sequential-30-day-code-history)
 9. [WebRTC Voice Rooms](#-webrtc-voice-rooms)
-10. [Automated Jest Test Suite (15/15 Passed)](#-automated-jest-test-suite-1515-passed)
+10. [Automated Jest Test Suite (22/22 Passed)](#-automated-jest-test-suite)
+11. [📄 Full Production AWS Guide (ALB+ASG+EC2)](./DEPLOYMENT.md)
+12. [💰 Cheapest 1-Server EC2 Guide ($3-$5/mo)](./SINGLE_EC2_DEPLOYMENT.md)
+13. [🏗️ Jenkins CI/CD AWS Deployment Guide](./JENKINS_CICD_DEPLOYMENT.md)
+14. [🗺️ Full Engineering Journey & Audit Log](./JOURNEY.md)
 
 ---
 

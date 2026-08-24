@@ -1,4 +1,4 @@
-﻿export interface RoomData {
+export interface RoomData {
     id: string;
     title: string;
     body: string;
@@ -18,8 +18,8 @@ export interface CreateRoomInput {
 }
 
 export interface UpdateRoomInput {
-    id: string;
-    title: string;
+    id?: string;
+    title?: string;
     body?: string;
     input?: string;
     language?: string;

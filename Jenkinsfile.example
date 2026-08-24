@@ -1,0 +1,100 @@
+pipeline {
+    agent any
+
+    environment {
+        APP_NAME = 'discode'
+        DOCKER_IMAGE = 'discode-app'
+        DOCKER_TAG = "${env.BUILD_NUMBER}"
+        TARGET_SERVER_IP = credentials('DISCODE_EC2_HOST') // Target EC2 Public/Private IP
+        SSH_CREDENTIAL_ID = 'discode-ec2-ssh-key'          // Jenkins SSH Credential ID
+        DOCKER_HUB_USER = credentials('DOCKER_HUB_USER')    // Docker Hub / ECR Username
+    }
+
+    options {
+        timeout(time: 20, unit: 'MINUTES')
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        ansiColor('xterm')
+    }
+
+    stages {
+        stage('📥 1. Checkout Code') {
+            steps {
+                echo "Pulling latest code from branch: ${env.BRANCH_NAME ?: 'main'}..."
+                checkout scm
+            }
+        }
+
+        stage('🛡️ 2. Typecheck & Automated Test Suite') {
+            steps {
+                echo "Running backend and frontend strict typechecks & Jest test suite..."
+                sh '''
+                    # Install dependencies and run strict TypeScript validation
+                    npm ci || npm install
+                    npm run typecheck
+
+                    # Run automated unit, sandbox runner, and socket tests
+                    npm test
+                '''
+            }
+        }
+
+        stage('📦 3. Build Docker Image') {
+            steps {
+                echo "Building production Docker image: ${DOCKER_IMAGE}:${DOCKER_TAG}..."
+                sh '''
+                    docker build -t ${DOCKER_IMAGE}:${DOCKER_TAG} -t ${DOCKER_IMAGE}:latest .
+                '''
+            }
+        }
+
+        stage('🚀 4. Deploy to Target EC2 Instance') {
+            steps {
+                echo "Deploying to target EC2 server: ${TARGET_SERVER_IP}..."
+                sshagent([SSH_CREDENTIAL_ID]) {
+                    sh '''
+                        # 1. Copy project configuration and compose files to target server
+                        ssh -o StrictHostKeyChecking=no ubuntu@${TARGET_SERVER_IP} "mkdir -p /opt/discode"
+                        scp -o StrictHostKeyChecking=no docker-compose.yml Dockerfile package.json tsconfig.json jest.config.js ubuntu@${TARGET_SERVER_IP}:/opt/discode/
+                        scp -r -o StrictHostKeyChecking=no src scripts frontend tests db ubuntu@${TARGET_SERVER_IP}:/opt/discode/
+
+                        # 2. Rebuild and launch container stack on the target server
+                        ssh -o StrictHostKeyChecking=no ubuntu@${TARGET_SERVER_IP} '
+                            cd /opt/discode
+                            sudo docker compose down || true
+                            sudo docker compose up --build -d
+                        '
+                    '''
+                }
+            }
+        }
+
+        stage('🩺 5. Health Check Verification') {
+            steps {
+                echo "Verifying application liveness probe at http://${TARGET_SERVER_IP}:8080/healthz..."
+                sh '''
+                    # Wait for container startup and probe /healthz
+                    sleep 10
+                    HEALTH_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://${TARGET_SERVER_IP}:8080/healthz || echo "000")
+                    if [ "$HEALTH_STATUS" -ne "200" ]; then
+                        echo "❌ Deployment failed: Health probe returned status ${HEALTH_STATUS}"
+                        exit 1
+                    else
+                        echo "✅ Deployment verified! Discode is healthy and running on http://${TARGET_SERVER_IP}:8080"
+                    fi
+                '''
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "🎉 Pipeline succeeded! Discode is live at http://${TARGET_SERVER_IP}:8080"
+        }
+        failure {
+            echo "❌ Pipeline failed! Check the console log for error details."
+        }
+        always {
+            cleanWs()
+        }
+    }
+}

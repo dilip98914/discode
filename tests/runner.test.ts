@@ -103,4 +103,44 @@ describe('⚡ Multi-Language Sandbox Runner Suite', () => {
         expect(detailsRes.data.status).toBe('completed');
         expect(detailsRes.data.stdout.trim()).toBe('MultiFileSum: 50');
     });
+
+    it('🚨 Compilation Error Handling: Should report build errors gracefully for invalid C++', async () => {
+        const payload = {
+            source_code: '#include <iostream>\nint main(){ this_is_invalid_syntax; }',
+            language: 'cpp'
+        };
+        const createRes = await axios.post(`${BASE_URL}/api/runner/create`, payload);
+        const { id } = createRes.data;
+
+        const detailsRes = await axios.get(`${BASE_URL}/api/runner/details?id=${id}`);
+        expect(detailsRes.data.status).toBe('error');
+        expect(detailsRes.data.build_stderr).toContain('error');
+    });
+
+    it('⏱️ Sandbox Timeout Guard: Should abort infinite execution loops within timeout', async () => {
+        const payload = {
+            source_code: 'while True: pass',
+            language: 'python',
+            timeoutMs: 1500
+        };
+        const createRes = await axios.post(`${BASE_URL}/api/runner/create`, payload);
+        const { id } = createRes.data;
+
+        const detailsRes = await axios.get(`${BASE_URL}/api/runner/details?id=${id}`);
+        expect(detailsRes.data.status).toBe('timeout');
+        expect(detailsRes.data.stderr).toContain('timed out');
+    });
+
+    it('🚫 Unsupported Language: Should return a friendly error message', async () => {
+        const payload = {
+            source_code: 'some unknown code',
+            language: 'unsupported_lang_xyz'
+        };
+        const createRes = await axios.post(`${BASE_URL}/api/runner/create`, payload);
+        const { id } = createRes.data;
+
+        const detailsRes = await axios.get(`${BASE_URL}/api/runner/details?id=${id}`);
+        expect(detailsRes.data.status).toBe('error');
+        expect(detailsRes.data.stderr).toContain('not supported');
+    });
 });

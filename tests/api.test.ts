@@ -18,15 +18,42 @@ describe('🏥 Health & Diagnostic Endpoints', () => {
     });
 });
 
-describe('🏠 Room Lifecycle & Strict Sequential History', () => {
+describe('🏠 Room Lifecycle, Edge Cases & Strict Sequential History', () => {
     let roomId = '';
+
+    it('POST /api/room should return 400 on empty room title', async () => {
+        try {
+            await axios.post(`${BASE_URL}/api/room`, { title: '   ' });
+            fail('Expected 400 error on empty title');
+        } catch (err: any) {
+            expect(err.response.status).toBe(400);
+        }
+    });
+
+    it('GET /api/room/:id should return 400 on invalid room id format', async () => {
+        try {
+            await axios.get(`${BASE_URL}/api/room/invalid-uuid-format-here`);
+            fail('Expected 400 error on invalid uuid');
+        } catch (err: any) {
+            expect(err.response.status).toBe(400);
+        }
+    });
+
+    it('GET /api/room/:id should return 404 on non-existent room uuid', async () => {
+        try {
+            await axios.get(`${BASE_URL}/api/room/a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11`);
+            fail('Expected 404 error');
+        } catch (err: any) {
+            expect(err.response.status).toBe(404);
+        }
+    });
 
     it('POST /api/room should create a valid new room', async () => {
         const payload = {
-            title: 'Jest Verification Room',
+            title: 'Jest Comprehensive Verification Room',
             language: 'python',
             body: 'print("Initial Code")',
-            author_name: 'Tester'
+            author_name: 'Lead Tester'
         };
         const res = await axios.post(`${BASE_URL}/api/room`, payload);
         expect(res.status).toBe(201);
@@ -38,7 +65,7 @@ describe('🏠 Room Lifecycle & Strict Sequential History', () => {
     it('GET /api/room/:id should fetch the created room metadata', async () => {
         const res = await axios.get(`${BASE_URL}/api/room/${roomId}`);
         expect(res.status).toBe(200);
-        expect(res.data.data.title).toBe('Jest Verification Room');
+        expect(res.data.data.title).toBe('Jest Comprehensive Verification Room');
         expect(res.data.data.language).toBe('python');
     });
 

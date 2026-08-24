@@ -1,4 +1,4 @@
-﻿import express from 'express';
+import express from 'express';
 import sql from '../models/db';
 import { sendSuccess, sendError } from '../utils';
 

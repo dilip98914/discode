@@ -71,4 +71,19 @@ describe('🌐 Socket.IO Real-Time Synchronization & Multi-Cursor Suite', () => 
 
         socket1.emit('cursor:move', { roomId: testRoomId, position: targetPos, selection: null });
     });
+
+    it('📁 Multi-File Sync: Should broadcast file operations and active tab changes', (done) => {
+        const filePayload = {
+            'main.py': 'print("hello")',
+            'helper.py': 'def help(): pass'
+        };
+
+        socket2.on('files:synced', ({ files, activeFile }: any) => {
+            expect(files['helper.py']).toBeDefined();
+            expect(activeFile).toBe('helper.py');
+            done();
+        });
+
+        socket1.emit('files:sync', { roomId: testRoomId, files: filePayload, activeFile: 'helper.py' });
+    });
 });

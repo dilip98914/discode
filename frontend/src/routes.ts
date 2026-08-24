@@ -1,5 +1,4 @@
 import Room from './pages/room';
-import Home from './pages/home';
 import NotFound from './pages/notfound';
 import JoinRoom from './pages/joinroom';
 import NewRoom from './pages/newroom';
@@ -12,7 +11,7 @@ interface IRoute {
 }
 
 let updatePreviousRooms: (room: string) => any = () => {
-    console.log('default');
+    // default no-op
 };
 
 let roomProps = {
@@ -51,5 +50,6 @@ const routes: Array<IRoute> = [
         component: NotFound
     }
 ];
+
 export { roomProps };
 export default routes;

@@ -1,5 +1,4 @@
 import React from 'react';
-import { useEffect } from 'react';
 import { Link } from 'react-router-dom';
 
 interface HistoryProps {
@@ -7,8 +6,6 @@ interface HistoryProps {
 }
 
 const History: React.FC<HistoryProps> = ({ previousRooms }) => {
-    useEffect(() => {}, [previousRooms]);
-
     return (
         <div>
             <table className="table table-hover">
@@ -44,7 +41,7 @@ const History: React.FC<HistoryProps> = ({ previousRooms }) => {
                                         }}
                                         to={`/room/${roomId}`}
                                     >
-                                        {roomTitle}
+                                        {roomTitle || 'Untitled Room'}
                                     </Link>
                                 </td>
                             </tr>

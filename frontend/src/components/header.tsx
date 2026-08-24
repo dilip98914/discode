@@ -1,14 +1,13 @@
-import React from 'react';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { Link, RouteComponentProps, withRouter } from 'react-router-dom';
 
 const Header: React.FC<RouteComponentProps<any>> = (props) => {
-    const [roomId, setRoomId] = useState<string>();
+    const [roomId, setRoomId] = useState<string>('');
 
     return (
         <nav className="navbar navbar-expand-lg navbar-dark bg-dark">
             <div className="container-fluid">
-                <Link className="navbar-brand" to="/">
+                <Link className="navbar-brand fw-bold text-primary" to="/">
                     Discode
                 </Link>
                 <button
@@ -52,8 +51,8 @@ const Header: React.FC<RouteComponentProps<any>> = (props) => {
                         <button
                             className="btn btn-outline-success"
                             onClick={() => {
-                                if (roomId) {
-                                    props.history.push(`/room/${roomId}`);
+                                if (roomId && roomId.trim()) {
+                                    props.history.push(`/room/${roomId.trim()}`);
                                     setRoomId('');
                                 }
                             }}

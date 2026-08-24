@@ -12,14 +12,18 @@ const App: React.FC = () => {
         if (previousRooms[0] === room) return;
         let newRooms = [...previousRooms];
         newRooms.unshift(room);
-        newRooms.slice(0, 40);
+        newRooms = newRooms.slice(0, 40);
         setPreviousRooms(newRooms);
     };
 
     useEffect(() => {
         const prevRoomsString = localStorage.getItem('previousRooms');
         if (prevRoomsString) {
-            setPreviousRooms(JSON.parse(prevRoomsString).previousRooms);
+            try {
+                setPreviousRooms(JSON.parse(prevRoomsString).previousRooms || []);
+            } catch {
+                setPreviousRooms([]);
+            }
         }
     }, []);
 
@@ -33,7 +37,6 @@ const App: React.FC = () => {
                 <Header />
                 <br />
                 <Switch>
-                    {/* Adding this manually because this structure of routes sucks */}
                     <Route exact path="/" render={() => <Home previousRooms={previousRooms} />} />
                     {routes.map((route, index) => {
                         return (
