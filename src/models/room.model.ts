@@ -1,55 +1,43 @@
 import { MysqlError } from 'mysql';
-import { type } from 'os';
 import sql from './db';
 import { uuid } from 'uuidv4';
+import { RoomData } from '../types';
 
-interface RoomData {
-    id?: string;
-    title?: string;
-    body?: string;
-    input?: string;
-    language?: string;
-}
-
-type Callback = (error: { error?: MysqlError; message: string } | null, data?: RoomData) => void;
+type Callback<T = RoomData> = (error: { error?: MysqlError; message: string } | null, data?: T) => void;
 
 class Room {
-    private data: RoomData;
-    constructor(data: RoomData) {
-        this.data = data;
-    }
-
-    static create = (data: RoomData, callback: Callback) => {
+    static create = (data: Partial<RoomData>, callback: Callback): void => {
         data.id = uuid();
-        sql.query('INSERT INTO rooms SET ? ', data, (error, res) => {
+        sql.query('INSERT INTO rooms SET ? ', data, (error) => {
             if (error) {
-                callback({ error, message: 'Mysql error' });
+                callback({ error, message: 'Database insert failed' });
             } else {
-                callback(null, { ...data });
+                callback(null, data as RoomData);
             }
         });
     };
 
-    static findById = (id: string, callback: Callback) => {
-        sql.query('SELECT * FROM rooms where id = ?', [id], (error, res) => {
+    static findById = (id: string, callback: Callback): void => {
+        sql.query('SELECT * FROM rooms WHERE id = ?', [id], (error, res) => {
             if (error) {
-                callback({ error, message: 'Mysql error' });
-            } else if (!res.length) {
-                callback({ message: 'No room found' });
+                callback({ error, message: 'Database query failed' });
+            } else if (!res || !res.length) {
+                callback({ message: 'Room not found' });
             } else {
-                callback(null, res[0]);
+                callback(null, res[0] as RoomData);
             }
         });
     };
 
-    static updateById = (data: RoomData, callback: Callback) => {
-        sql.query('UPDATE rooms SET ? WHERE id = ?', [data, data.id], (error, res) => {
+    static updateById = (data: Partial<RoomData>, callback: Callback): void => {
+        const { id, ...fieldsToUpdate } = data;
+        sql.query('UPDATE rooms SET ? WHERE id = ?', [fieldsToUpdate, id], (error, res) => {
             if (error) {
-                callback({ error, message: 'Mysql error' });
-            } else if (!res.affectedRows) {
-                callback({ message: 'No room found' });
+                callback({ error, message: 'Database update failed' });
+            } else if (!res || !res.affectedRows) {
+                callback({ message: 'Room not found' });
             } else {
-                callback(null, data);
+                callback(null, data as RoomData);
             }
         });
     };

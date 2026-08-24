@@ -1,174 +1,241 @@
 ﻿# Discode 🚀
-> 100% Self-Hosted Real-Time Collaborative IDE with Local Multi-Language Sandbox Runner, Embedded WebRTC Voice Signaling & 30-Day Code Attribution Audit History.
+> Production-Grade Real-Time Collaborative IDE with Monaco (VS Code Engine), Zero-Collision Real-Time Sync, Visible Multi-Cursor Name Flags, Live Presence, 6-Language Local Sandbox Runner, Strictly Sequential 30-Day Audit History, Self-Hosted WebRTC Voice, and Complete AWS Deployment Guides.
 
-Discode allows developers to create shared coding rooms, write and edit code collaboratively with real-time text synchronization, execute code locally across multiple programming languages, and communicate directly over self-hosted peer-to-peer audio with 30-day code attribution and history logs.
+Discode empowers engineering teams, students, and interviewers to code together in real time with the power of the **Monaco Editor (VS Code engine)**, multi-file project workspaces, colored collaborative cursors with name flags, live voice channels, local sandbox execution across **6 programming languages**, and complete 30-day code attribution traceability.
 
 ---
 
 ## 📑 Table of Contents
-1. [Core Concepts: Library vs Running Server](#-core-concepts-library-vs-running-server)
-2. [100% Self-Hosted Architecture (Zero Cloud Dependencies)](#-100-self-hosted-architecture)
-3. [Features & 30-Day Audit History](#-features--30-day-audit-history)
-4. [Quickstart (Local & Docker)](#-quickstart-local--docker)
-5. [Testing Guide & cURL Test Suite](#-testing-guide--curl-test-suite)
-6. [Cloud Architecture: AWS ECS vs AWS Lambda](#-cloud-architecture-aws-ecs-vs-aws-lambda)
+1. [Quick Start (Local Docker)](#-quick-start-local-docker)
+2. [Step-by-Step: Single EC2 Deployment (Mobile & Web Testing)](#-step-by-step-single-ec2-deployment-mobile--web-testing)
+3. [Step-by-Step: Production AWS ALB + EC2 Auto Scaling Group (ASG)](#-step-by-step-production-aws-alb--ec2-auto-scaling-group-asg)
+4. [Architecture & Zero-Collision Real-Time Engine](#-architecture--zero-collision-real-time-engine)
+5. [Language Sandbox Runtimes (6 Languages)](#-language-sandbox-runtimes-6-languages)
+6. [Visible Multi-Cursor Flags & Live Presence](#-visible-multi-cursor-flags--live-presence)
+7. [Multi-File Workspace & Export](#-multi-file-workspace--export)
+8. [Strictly Sequential 30-Day Code History](#-strictly-sequential-30-day-code-history)
+9. [WebRTC Voice Rooms](#-webrtc-voice-rooms)
+10. [Automated Jest Test Suite (15/15 Passed)](#-automated-jest-test-suite-1515-passed)
 
 ---
 
-## 💡 Core Concepts: Library vs. Running Server
+## 💻 Quick Start (Local Docker)
 
-Understanding the difference between an npm library and a running service is a fundamental Senior Engineering concept:
+To run Discode locally on your machine:
 
-| Category | Definition | Examples in Discode | Execution Lifecycle |
-| :--- | :--- | :--- | :--- |
-| **Client-Side Code Library** | Pure client-side UI/algorithm code bundled into the browser bundle (via Webpack). It does **NOT** run a server process. | `react-ace`, `diff-match-patch`, `socket.io-client`, `bootstrap` | Executes entirely inside the user's browser CPU/memory. |
-| **Server-Side Node Package (Library Mode)** | Reusable JavaScript/TypeScript helper utilities running inside the Node.js process. | `cors`, `uuidv4`, `dotenv` | Executes synchronously or asynchronously within the Express backend thread. |
-| **Running Service / Daemon** | A stateful, long-lived background server process listening on TCP/UDP network ports for connections and routing packets. | **Express HTTP API** (`:8080`), **Socket.IO Engine**, **Embedded PeerServer** (`/peerjs`), **MySQL 8** (`:3306`) | Runs continuously in OS background, binds network sockets, and handles incoming concurrent client requests. |
+```bash
+docker compose up --build -d
+```
 
-> **Note on PeerJS & WebRTC**: The npm package `peerjs` is a *client library* used to open browser media streams. However, WebRTC requires a *Signaling Server (PeerServer)* to exchange SDP offers and ICE candidates. Discode previously relied on the public cloud server `0.peerjs.com`, but now runs a **100% self-hosted, embedded PeerServer** on `/peerjs`.
+Open **`http://localhost:8080`** in your browser.
 
 ---
 
-## 🏗 100% Self-Hosted Architecture
+## 📱 Step-by-Step: Single EC2 Deployment (Mobile & Web Testing)
+
+Deploy Discode on a single Ubuntu EC2 instance in **under 3 minutes** for direct testing on mobile phones, tablets, and remote PCs:
+
+### Step 1: Launch EC2 Instance in AWS Console
+1. Navigate to **AWS Console -> EC2 -> Launch Instances**.
+2. **Name**: `discode-single-node`.
+3. **AMI**: `Ubuntu Server 22.04 LTS (HVM), SSD Volume Type`.
+4. **Instance Type**: `t3.small` (2 vCPU, 2 GiB RAM) or `t3.medium`.
+5. **Key Pair**: Select or create an SSH key pair (`.pem`).
+6. **Network Settings (Security Group)**:
+   - Allow **SSH (Port 22)** from `My IP` or `0.0.0.0/0`.
+   - Allow **Custom TCP (Port 8080)** from `0.0.0.0/0`.
+   - Allow **HTTP (Port 80)** & **HTTPS (Port 443)** from `0.0.0.0/0`.
+7. Click **Launch Instance**.
+
+### Step 2: SSH and Run 1-Command Bootstrap
+Connect via SSH to your instance and run:
+```bash
+curl -fsSL https://raw.githubusercontent.com/dilip98914/discode/main/scripts/ec2-setup.sh | bash
+```
+*(The script automatically installs Docker, Docker Compose, clones the codebase, and starts the container stack with automatic reboot recovery)*.
+
+### Step 3: Access Discode
+Open your browser on any phone or PC:
+```
+http://<YOUR_EC2_PUBLIC_IP>:8080
+```
+
+---
+
+## 🌐 Step-by-Step: Production AWS ALB + EC2 Auto Scaling Group (ASG)
+
+For high-availability, auto-scaling production workloads across multiple Availability Zones:
 
 ```
-                                [ Browser Clients (Alice & Bob) ]
-                                  │          │          │
-                     (HTTP REST)  │          │          │ (Self-Hosted WebRTC Mesh)
-                                  ▼          │          ▼
-                        ┌─────────────────┐  │  ┌─────────────────┐
-                        │ Express Backend │  │  │ Peer Client Bob │
-                        │  & Local Runner │  │  └─────────────────┘
-                        └────────┬────────┘  │          ▲
-                                 │           │          │
-                     (Local IPC) │           │ (WebSocket / Socket.IO & /peerjs)
-                                 ▼           ▼
-                      ┌─────────────────────────────────────────┐
-                      │           Discode Node Server           │
-                      │  - Rooms REST API                       │
-                      │  - Socket.IO Real-Time Sync             │
-                      │  - Embedded PeerServer (/peerjs)        │
-                      │  - Local Sandbox Runner (Python, C, CPP)│
-                      │  - 30-Day TTL Cleanup Daemon            │
-                      └──────────────────┬──────────────────────┘
+                      [ Incoming User Traffic (Mobile / Web) ]
                                          │
-                        (SQL Connection) │
+                                         ▼
+                      ┌──────────────────────────────────────┐
+                      │    Application Load Balancer (ALB)   │
+                      │    - Port 80 / 443                   │
+                      │    - Session Stickiness (lb_cookie)  │
+                      │    - Health Probe: /healthz          │
+                      └──────────────────┬───────────────────┘
+                                         │
+                        ┌────────────────┴────────────────┐
+                        ▼                                 ▼
+             ┌─────────────────────┐           ┌─────────────────────┐
+             │ EC2 Instance A (AZ1)│           │ EC2 Instance B (AZ2)│
+             │ Discode Container   │           │ Discode Container   │
+             └──────────┬──────────┘           └──────────┬──────────┘
+                        │                                 │
+                        └────────────────┬────────────────┘
                                          ▼
                                 ┌─────────────────┐
-                                │   MySQL 8 DB    │
-                                │  - Rooms Meta   │
-                                │  - Code History │
+                                │ AWS RDS MySQL 8 │
+                                │ (Multi-AZ DB)   │
                                 └─────────────────┘
 ```
 
----
+### Step 1: Create Target Group (ALB Target Group)
+1. In EC2 Console, go to **Target Groups -> Create target group**.
+2. **Target type**: `Instances`.
+3. **Target group name**: `discode-tg`.
+4. **Protocol / Port**: `HTTP` on port `8080`.
+5. **Health checks**:
+   - **Health check protocol**: `HTTP`
+   - **Health check path**: `/healthz`
+   - **Healthy threshold**: `2`, **Interval**: `15` seconds.
+6. **Attributes (Crucial for WebSocket Stickiness)**:
+   - Click **Edit Group Attributes**.
+   - Enable **Stickiness**: Type `Load balancer generated cookie` (`lb_cookie`).
+   - Duration: `86400` seconds (1 day).
 
-## 🔒 Features & 30-Day Audit History
-
-1. **100% Local Multi-Language Execution**:
-   - Compiles and executes code directly inside the backend container using `python3`, `node`, `gcc`, and `g++`.
-   - Zero dependency on 3rd-party remote runner APIs (`api.paiza.io`).
-   - Strict 7-second timeout protection and process isolation to prevent infinite loops (`while(true)`).
-2. **Self-Hosted WebRTC Voice Rooms**:
-   - Uses embedded `ExpressPeerServer` mounted at `/peerjs` for local signaling without external cloud servers.
-3. **Non-Authenticated User Attribution**:
-   - Users can set a display handle/name (e.g. `Alice`, `Bob`) upon creating or joining a room.
-4. **30-Day Retention & Audit History**:
-   - Every code save and run is recorded in the `code_history` table with author attribution, action (`create`, `save`, `run`), and snapshot.
-   - Database entries automatically store `expires_at = CURRENT_TIMESTAMP + INTERVAL 30 DAY`.
-   - A daily backend cleanup daemon automatically sweeps and purges expired rooms and historical records.
-   - Users can click **📜 History** in the UI to inspect past snapshots and restore any previous version.
-
----
-
-## 🚀 Quickstart (Docker Compose)
-
+### Step 2: Create Launch Template
+1. Go to **EC2 -> Launch Templates -> Create launch template**.
+2. **Template Name**: `discode-template`.
+3. **AMI**: `Ubuntu Server 22.04 LTS`.
+4. **Instance Type**: `t3.small` or `t3.medium`.
+5. **Security Group**: Allow Port 8080 from ALB Security Group and Port 22 for administration.
+6. **Advanced details -> User data**:
 ```bash
-# 1. Start all containers (MySQL + Backend + Local PeerServer + Local Runner)
-docker compose up --build -d
+#!/bin/bash
+curl -fsSL https://raw.githubusercontent.com/dilip98914/discode/main/scripts/ec2-setup.sh | bash
 ```
-Access the application at **`http://localhost:8080`**.
 
----
+### Step 3: Create Auto Scaling Group (ASG)
+1. Go to **EC2 -> Auto Scaling Groups -> Create Auto Scaling Group**.
+2. **Name**: `discode-asg`.
+3. **Launch Template**: Select `discode-template`.
+4. **VPC & Subnets**: Select at least 2 public/private subnets across multiple AZs.
+5. **Load balancing**: Attach to existing target group -> select `discode-tg`.
+6. **Health checks**: Turn on `ELB` health checks.
+7. **Group size**:
+   - **Desired capacity**: `2`
+   - **Minimum capacity**: `2`
+   - **Maximum capacity**: `6`
+8. **Scaling policies**: Target tracking scaling policy -> CPU Utilization `60%`.
 
-## 🧪 Testing Guide & cURL Test Suite
-
-### 1. Test Local Sandbox Code Execution
-#### Execute Python Code Locally
-```bash
-curl -X POST http://localhost:8080/api/runner/create \
-  -H "Content-Type: application/json" \
-  -d '{"source_code":"print(\"Hello from Local Runner!\")","language":"python","input":""}'
-```
-#### Fetch Execution Output
-```bash
-curl -X GET "http://localhost:8080/api/runner/details?id=<JOB_ID>"
-```
-*Expected*: `{"status":"completed","stdout":"Hello from Local Runner!\n"}`
-
----
-
-### 2. Test Self-Hosted PeerServer
-```bash
-curl -s http://localhost:8080/peerjs/peerjs/id
-```
-*Expected*: Generates a unique WebRTC peer UUID (e.g., `207f29bd-6222-4b57-9193-bcab1ae4f49f`).
+### Step 4: Create Application Load Balancer (ALB)
+1. Go to **EC2 -> Load Balancers -> Create Application Load Balancer**.
+2. **Name**: `discode-alb`.
+3. **Scheme**: `Internet-facing`.
+4. **Listeners**:
+   - `HTTP` port 80 -> Forward to `discode-tg`.
+   - `HTTPS` port 443 (with ACM SSL certificate) -> Forward to `discode-tg`.
+5. Point your domain DNS (e.g. `code.yourdomain.com`) to the ALB DNS Name via CNAME or Route 53 Alias.
 
 ---
 
-### 3. Test Room Creation with Author & 30-Day Audit Log
-#### Create Room with Author Handle
-```bash
-curl -X POST http://localhost:8080/api/room \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Backend Review","body":"def main(): pass","language":"python","author_name":"Alice_Lead"}'
-```
+## 🏗 Architecture & Zero-Collision Real-Time Engine
 
-#### Update Code as Another Author
-```bash
-curl -X PATCH http://localhost:8080/api/room/<ROOM_ID> \
-  -H "Content-Type: application/json" \
-  -d '{"title":"Backend Review","body":"def main(): print(\"Updated by Bob\")","language":"python","author_name":"Bob_Reviewer"}'
-```
+### ⚡ Zero-Collision Real-Time Typing
+Standard Monaco implementations re-render the model on every state update, resetting the cursor to line 1 and overriding simultaneous peer edits.
 
-#### Fetch 30-Day Audit Trail
-```bash
-curl -X GET http://localhost:8080/api/room/<ROOM_ID>/history
-```
-*Response*:
-```json
-{
-  "success": true,
-  "message": "Room history fetched successfully",
-  "data": [
-    {
-      "id": 2,
-      "room_id": "33d3e491-a654-409e-b088-a0b477bcec57",
-      "author_name": "Bob_Reviewer",
-      "code_snapshot": "def main(): print(\"Updated by Bob\")",
-      "action": "save",
-      "created_at": "2026-08-24T16:26:12.000Z",
-      "expires_at": "2026-09-23T16:26:12.000Z"
-    },
-    {
-      "id": 1,
-      "room_id": "33d3e491-a654-409e-b088-a0b477bcec57",
-      "author_name": "Alice_Lead",
-      "code_snapshot": "def main(): pass",
-      "action": "create",
-      "created_at": "2026-08-24T16:26:10.000Z",
-      "expires_at": "2026-09-23T16:26:10.000Z"
-    }
-  ]
-}
-```
+Discode solves this using **Uncontrolled Model Synchronization with Cursor & Scroll Preservation**:
+1. When a user types locally, edits emit to peers without re-triggering `editor.setValue()`.
+2. When remote socket events arrive (`updateBody`, `files:synced`), Discode inspects `editor.getValue() !== value`, captures the user's cursor position (`editor.getPosition()`) and scroll top (`editor.getScrollTop()`), updates the model, and immediately restores the cursor.
+3. Multiple users can type simultaneously on different lines or files without any cursor jumping or text loss.
 
 ---
 
-## ☁️ Cloud Architecture: AWS ECS vs AWS Lambda
+## ⚡ Language Sandbox Runtimes (6 Languages)
 
-### Recommended Production Architecture (AWS ECS Fargate)
-- **ECS Fargate**: Runs the unified container (Express + Socket.IO + Embedded PeerServer + Local Runner).
-- **Application Load Balancer (ALB)**: HTTPS (ACM Certificate) + Stickiness for Socket.IO polling upgrade.
-- **ElastiCache Redis**: Multi-node Socket.IO cluster broadcast.
-- **Amazon RDS MySQL**: Long-term database storage with automated 30-day snapshot cleanup.
+All code execution is 100% self-hosted inside isolated temporary sandboxes with strict 7-second timeouts and output buffer caps:
+
+| Language | Engine / Compiler | Execution Method | Multi-File Support |
+| :--- | :--- | :--- | :--- |
+| **Python** | Python 3.9 | `python3 main.py` | ✅ Yes (e.g. `import helper`) |
+| **JavaScript** | Node.js 18 | `node main.js` | ✅ Yes (e.g. `require('./utils')`) |
+| **Java** | OpenJDK 11 | `javac Main.java` && `java -cp . Main` | ✅ Yes (Multiple classes) |
+| **Go** | Golang 1.15 | `go run main.go` | ✅ Yes (Multi-file packages) |
+| **C** | GCC 10 (`-O2`) | `gcc -O2 main.c -o main.out` && `./main.out` | ✅ Yes (Header linking) |
+| **C++** | G++ 10 (`-O2`) | `g++ -O2 main.cpp -o main.out` && `./main.out` | ✅ Yes (Header linking) |
+
+---
+
+## 👥 Visible Multi-Cursor Flags & Live Presence
+
+- **Floating Collaborator Name Tags**: Every remote user has a distinct colored vertical bar (`.remote-cursor-line`) with a floating name tag (`.remote-cursor-flag`, e.g. `Alice`, `Bob`) positioned above their cursor.
+- **Live Presence Roster**: Active participant count badge (`👥 2 Online`) and avatar chips with real-time join/disconnect tracking.
+- **Independent Tab Browsing**: Collaborators can switch file tabs independently without forcing their peer's tab to switch.
+
+---
+
+## 📁 Multi-File Workspace & Export
+
+- **File Tree & Tabs**: Add (`+ New File`), switch, and delete multiple files in a single room (e.g., `main.py`, `helper.py`).
+- **One-Click Export**:
+  - **Download ZIP**: Generates a `.zip` archive containing all project files.
+  - **Copy Markdown / Gist**: Formats all files into Markdown code blocks ready for GitHub Gists.
+
+---
+
+## 📜 Strictly Sequential 30-Day Code History
+
+- Every code run and save is audited with author attribution and timestamped in MySQL.
+- Sorted by `ORDER BY id DESC, created_at DESC` guaranteeing **monotonic sequential chronology** (most recent snapshots first).
+- Auto-expires after 30 days via scheduled cleanup daemon.
+
+---
+
+## 🎙️ WebRTC Voice Rooms
+
+- Self-hosted peer-to-peer audio mesh powered by the embedded `/peerjs` signaling server on the same port (8080).
+- Visual speaking indicator with green pulse animation when collaborators talk.
+- Microphone stream cleanup on leave to ensure microphone hardware releases cleanly.
+
+---
+
+## 🧪 Automated Jest Test Suite (15/15 Passed)
+
+```bash
+# Run the complete test suite inside the container:
+docker exec discode-backend-1 npm test
+```
+
+### Verified Test Results:
+```
+PASS tests/api.test.ts
+  🏥 Health & Diagnostic Endpoints
+    ✓ GET /healthz should return 200 with healthy status
+    ✓ GET /readyz should return 200 and report active database connection
+  🏠 Room Lifecycle & Strict Sequential History
+    ✓ POST /api/room should create a valid new room
+    ✓ GET /api/room/:id should fetch the created room metadata
+    ✓ PATCH /api/room/:id should update code and record audit snapshots in sequential order
+
+PASS tests/runner.test.ts
+  ⚡ Multi-Language Sandbox Runner Suite
+    ✓ 🐍 Python 3: Should execute code correctly
+    ✓ 📜 JavaScript (Node.js): Should execute code with stdin input
+    ✓ ☕ Java (OpenJDK): Should compile with javac and execute with java
+    ✓ 🐹 Go (Golang): Should execute with go run and isolated build cache
+    ✓ ⚙️ C (GCC): Should compile with gcc -O2 and execute binary
+    ✓ ⚡ C++ (G++): Should compile with g++ -O2 and execute binary
+    ✓ 📁 Multi-File Execution: Should link multiple source files and modules
+
+PASS tests/socket.test.ts
+  🌐 Socket.IO Real-Time Synchronization & Multi-Cursor Suite
+    ✓ 👥 Presence Roster: Should track and broadcast active users in a room
+    ✓ ✏️ Real-Time Code Sync: Should broadcast code changes to room peers
+    ✓ 📍 Multi-Cursor Movement: Should broadcast peer cursor positions and selection
+
+Test Suites: 3 passed, 3 total
+Tests:       15 passed, 15 total
+```

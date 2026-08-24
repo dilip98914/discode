@@ -1,8 +1,8 @@
 import io from 'socket.io-client';
 import { baseURL } from '../config/config';
 
-const socket = io(baseURL, {
-    transports: ['websocket', 'polling'],
+const socket = io({
+    transports: ['polling', 'websocket'],
     autoConnect: true,
     reconnection: true,
     reconnectionAttempts: Infinity,

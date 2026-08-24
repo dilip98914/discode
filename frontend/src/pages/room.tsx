@@ -1,207 +1,247 @@
-import React, { useEffect, useState } from 'react';
+﻿import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { RouteComponentProps, withRouter } from 'react-router';
-import Editor from '../components/editor';
-import { languageToEditorMode } from '../config/mappings';
+import MonacoEditor from '../components/MonacoEditor';
+import FileTree from '../components/FileTree';
+import PresenceRoster from '../components/PresenceRoster';
+import ExportModal from '../components/ExportModal';
 import API from '../utils/API';
-import { debounce } from '../utils/utils';
 import SplitPane from 'react-split-pane';
-
-import socket from './../utils/socket';
-import { baseURL } from '../config/config';
+import socket from '../utils/socket';
 import Peer from 'peerjs';
+import { UserPresence, RemoteCursor, ProjectFiles, CodeHistoryItem } from '../types';
 
 interface RoomProps {
     updatePreviousRooms: (room: string) => any;
 }
 
-var myPeer: Peer;
-var audios: { [id: string]: { id: string; stream: MediaStream } } = {};
-var peers: { [id: string]: Peer.MediaConnection } = {};
-var myAudio: MediaStream | null;
+let myPeer: Peer;
+let myAudio: MediaStream | null = null;
 
-// Audio rooms work fine for the most part, except for the asynchrousity caused by hooks that sometimes leads
-// to trying to destroy an already destoyed thing, or when we were in process of it.
-// So yeah, something to work on #TODO
+const USER_COLORS = ['#ff4d4f', '#40a9ff', '#73d13d', '#9254de', '#ffc53d', '#36cfc9', '#ff7a45'];
 
 const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
     const [id, setId] = useState<string>('');
     const [title, setTitle] = useState<string>('');
-    const [body, setBody] = useState<string>('');
     const [input, setInput] = useState<string>('');
     const [output, setOutput] = useState<string>('');
-
-    const [widthLeft, setWidthLeft] = useState<string>('');
-    const [widthRight, setWidthRight] = useState<string>('');
     const [windowWidth, setWindowWidth] = useState<number>(window.innerWidth);
 
-    const languages = Object.keys(languageToEditorMode);
-    const fontSizes = ['8', '10', '12', '14', '16', '18', '20', '22', '24', '26', '28', '30', '32'];
-    const themes = [
-        'monokai',
-        'github',
-        'solarized_dark',
-        'dracula',
-        'eclipse',
-        'tomorrow_night',
-        'tomorrow_night_blue',
-        'xcode',
-        'ambiance',
-        'solarized_light'
-    ].sort();
+    // Multi-File State & Refs (To prevent stale closures in socket events)
+    const [files, setFiles] = useState<ProjectFiles>({
+        'main.py': '# Collaborative Python Script\nprint("Hello from Discode!")\n'
+    });
+    const filesRef = useRef<ProjectFiles>(files);
+    filesRef.current = files;
 
-    const [language, setLanguage] = useState<string>(localStorage.getItem('language') ?? 'c');
-    const [theme, setTheme] = useState<string>(localStorage.getItem('theme') ?? 'monokai');
-    const [fontSize, setFontSize] = useState<string>(localStorage.getItem('fontSize') ?? '12');
+    const [activeFile, setActiveFile] = useState<string>('main.py');
+    const activeFileRef = useRef<string>(activeFile);
+    activeFileRef.current = activeFile;
 
+    // Language & Font
+    const languages = ['python', 'javascript', 'java', 'go', 'c', 'cpp', 'text'];
+    const [language, setLanguage] = useState<string>(localStorage.getItem('language') ?? 'python');
+    const [fontSize, setFontSize] = useState<number>(14);
+
+    // User Handle & Presence
     const [userName, setUserName] = useState<string>(
-        localStorage.getItem('discode_username') || 'Developer'
+        localStorage.getItem('discode_username') || `Dev-${Math.floor(1000 + Math.random() * 9000)}`
     );
+    const userNameRef = useRef<string>(userName);
+    userNameRef.current = userName;
+
+    const userColor = useMemo(() => USER_COLORS[Math.floor(Math.random() * USER_COLORS.length)], []);
+    const [presenceUsers, setPresenceUsers] = useState<UserPresence[]>([]);
+    const [remoteCursors, setRemoteCursors] = useState<{ [userId: string]: RemoteCursor }>({});
+
+    // History & Export Modals
     const [showHistory, setShowHistory] = useState<boolean>(false);
-    const [historyList, setHistoryList] = useState<any[]>([]);
+    const [historyList, setHistoryList] = useState<CodeHistoryItem[]>([]);
+    const [showExport, setShowExport] = useState<boolean>(false);
 
+    // Runner Status
     const idleStatus = 'Idle';
-    const runningStatus = 'running';
-    const compeletedStatus = 'completed';
-    const errorStatus = 'Some error occured';
-
+    const runningStatus = 'Running...';
+    const completedStatus = 'Completed';
+    const errorStatus = 'Error';
     const [submissionStatus, setSubmissionStatus] = useState<string>(idleStatus);
     const [submissionId, setSubmissionId] = useState<string>('');
 
-    const [submissionCheckerId, setSubmissionCheckerId] = useState<NodeJS.Timeout | null>(null);
-
+    // Audio
     const [inAudio, setInAudio] = useState<boolean>(false);
-    const [isMuted, setIsMuted] = useState<boolean>(false);
 
-    useEffect(() => {
-        socket.off('userjoined');
-        socket.on('userjoined', () => {
-            socket.emit('setBody', { value: body, roomId: id });
-            socket.emit('setLanguage', { value: language, roomId: id });
-            socket.emit('setInput', { value: input, roomId: id });
-            socket.emit('setOutput', { value: output, roomId: id });
+    const activeCode = files[activeFile] ?? '';
+
+    // Broadcast active file code change
+    const handleCodeChange = useCallback((newCode: string) => {
+        const currentFile = activeFileRef.current;
+        const updatedFiles = { ...filesRef.current, [currentFile]: newCode };
+        setFiles(updatedFiles);
+
+        socket.emit('updateBody', { value: newCode, roomId: props.match.params.id });
+        socket.emit('files:sync', {
+            roomId: props.match.params.id,
+            files: updatedFiles,
+            activeFile: currentFile
         });
-    }, [body, language, input, output, id]);
-
-    useEffect(() => {
-        socket.off('updateBody');
-        socket.on('updateBody', (incomingBody: string) => {
-            setBody(incomingBody);
-        });
-        return () => {
-            socket.off('updateBody');
-        };
-    }, []);
-
-    useEffect(() => {
-        socket.off('updateInput');
-        socket.on('updateInput', (incomingInput: string) => {
-            setInput(incomingInput);
-        });
-        return () => {
-            socket.off('updateInput');
-        };
-    }, []);
-
-    useEffect(() => {
-        const id = props.match.params.id;
-        setId(id);
-        socket.emit('joinroom', id);
-
-        API.get(`/api/room/${id}`)
-            .then((res) => {
-                const { title, body, language, input } = res.data.data;
-                if (title) {
-                    setTitle(title);
-                    document.title = `Discode: ${title}`;
-                    props.updatePreviousRooms(`${id}!${title}`);
-                }
-                setBody(body ?? '');
-                setInput(input ?? '');
-                if (language) setLanguage(language);
-                console.log(language);
-            })
-            .catch((err) => {
-                props.history.push('/404');
-            });
-        return () => {
-            if (myPeer) {
-                socket.emit('leaveAudioRoom', myPeer.id);
-                destroyConnection();
-            }
-            myAudio = null;
-            socket.emit('leaveroom', id);
-        };
     }, [props.match.params.id]);
 
+    // Handle File Operations
+    const handleSelectFile = (filename: string) => {
+        setActiveFile(filename);
+        socket.emit('file:switch', { roomId: id, activeFile: filename });
+    };
+
+    const handleCreateFile = (filename: string) => {
+        const updatedFiles = { ...filesRef.current, [filename]: '' };
+        setFiles(updatedFiles);
+        setActiveFile(filename);
+        socket.emit('files:sync', { roomId: id, files: updatedFiles, activeFile: filename });
+    };
+
+    const handleDeleteFile = (filename: string) => {
+        const remaining = { ...filesRef.current };
+        delete remaining[filename];
+        const nextActive = Object.keys(remaining)[0] || 'main.py';
+        if (!remaining[nextActive]) remaining[nextActive] = '';
+        setFiles(remaining);
+        setActiveFile(nextActive);
+        socket.emit('files:sync', { roomId: id, files: remaining, activeFile: nextActive });
+    };
+
+    // Join and Sync Lifecycle
     useEffect(() => {
-        socket.on('setBody', (body) => {
-            setBody(body);
+        const roomId = props.match.params.id;
+        setId(roomId);
+
+        const joinRoom = () => {
+            socket.emit('joinroom', roomId);
+            socket.emit('user:join', {
+                roomId,
+                user: {
+                    id: socket.id,
+                    name: userNameRef.current,
+                    color: userColor,
+                    activeFile: activeFileRef.current
+                }
+            });
+        };
+
+        if (socket.connected) {
+            joinRoom();
+        }
+        socket.on('connect', joinRoom);
+
+        // Fetch initial room state from backend
+        API.get(`/api/room/${roomId}`)
+            .then((res) => {
+                const { title: rTitle, body: rBody, language: rLang, input: rInput } = res.data.data;
+                if (rTitle) {
+                    setTitle(rTitle);
+                    document.title = `Discode: ${rTitle}`;
+                    props.updatePreviousRooms(`${roomId}!${rTitle}`);
+                }
+                if (rLang) setLanguage(rLang);
+                if (rInput) setInput(rInput);
+
+                if (rBody) {
+                    try {
+                        const parsed = JSON.parse(rBody);
+                        if (parsed && parsed.files && Object.keys(parsed.files).length > 0) {
+                            setFiles(parsed.files);
+                            const initialActive = parsed.activeFile || Object.keys(parsed.files)[0];
+                            setActiveFile(initialActive);
+                        } else {
+                            setFiles({ [`main.${getExtension(rLang || 'python')}`]: rBody });
+                        }
+                    } catch {
+                        setFiles({ [`main.${getExtension(rLang || 'python')}`]: rBody });
+                    }
+                }
+            })
+            .catch(() => props.history.push('/404'));
+
+        // Real-Time Socket Listeners
+        socket.on('presence:update', (users: UserPresence[]) => {
+            setPresenceUsers(users || []);
         });
-        socket.on('setInput', (input) => {
-            setInput(input);
+
+        socket.on('cursor:update', (cursor: RemoteCursor) => {
+            setRemoteCursors((prev) => ({ ...prev, [cursor.userId]: cursor }));
         });
-        socket.on('setLanguage', (language) => {
-            setLanguage(language);
+
+        socket.on('cursor:remove', ({ userId }: { userId: string }) => {
+            setRemoteCursors((prev) => {
+                const copy = { ...prev };
+                delete copy[userId];
+                return copy;
+            });
         });
-        socket.on('setOutput', (output) => {
-            setOutput(output);
+
+        socket.on('files:synced', ({ files: incomingFiles }: { files: ProjectFiles }) => {
+            if (incomingFiles) {
+                setFiles(incomingFiles);
+            }
         });
+
+        socket.on('updateBody', (incomingBody: string) => {
+            setFiles((prev) => ({ ...prev, [activeFileRef.current]: incomingBody }));
+        });
+
+        socket.on('setBody', (incomingBody: string) => {
+            setFiles((prev) => ({ ...prev, [activeFileRef.current]: incomingBody }));
+        });
+
+        socket.on('updateInput', (incomingInput: string) => setInput(incomingInput));
+        socket.on('setInput', (incomingInput: string) => setInput(incomingInput));
+        socket.on('setLanguage', (lang: string) => setLanguage(lang));
+        socket.on('setOutput', (out: string) => setOutput(out));
 
         const resizeCallback = () => setWindowWidth(window.innerWidth);
         window.addEventListener('resize', resizeCallback);
 
         return () => {
             window.removeEventListener('resize', resizeCallback);
+            socket.off('connect', joinRoom);
+            socket.off('presence:update');
+            socket.off('cursor:update');
+            socket.off('cursor:remove');
+            socket.off('files:synced');
+            socket.off('updateBody');
+            socket.off('setBody');
+            socket.off('updateInput');
+            socket.off('setInput');
+            socket.off('setLanguage');
+            socket.off('setOutput');
+            socket.emit('leaveroom', roomId);
         };
-    }, []);
+    }, [props.match.params.id, userColor]);
 
-    useEffect(() => {
-        setInAudio(false);
-    }, [id]);
-
-    useEffect(() => {
-        if (submissionCheckerId && submissionStatus == compeletedStatus) {
-            clearInterval(submissionCheckerId);
-            setSubmissionCheckerId(null);
-
-            API.get(`/api/runner/details?id=${encodeURIComponent(submissionId)}`).then((res) => {
-                const { stdout, stderr, build_stderr } = res.data;
-                console.log(res.data);
-                let output = '';
-                if (stdout) output += stdout;
-                if (stderr) output += stderr;
-                if (build_stderr) output += build_stderr;
-                setOutput(output);
-                socket.emit('setOutput', { value: output, roomId: id });
-            });
-        }
-    }, [submissionStatus]);
-
-    const fetchHistory = () => {
-        API.get(`/api/room/${id}/history`)
-            .then((res) => {
-                setHistoryList(res.data.data || []);
-                setShowHistory(true);
-            })
-            .catch(() => alert('Could not fetch room audit history'));
+    // Handle Cursor Movement
+    const handleCursorChange = (pos: { lineNumber: number; column: number }) => {
+        socket.emit('cursor:move', { roomId: id, position: pos });
     };
 
+    // Code Execution
     const handleSubmit = () => {
         if (submissionStatus === runningStatus) return;
         setSubmissionStatus(runningStatus);
 
-        API.patch(`/api/room/${id}`, { title, body, input, language, author_name: userName })
-            .then(() => {})
-            .catch(() => {
-                setSubmissionStatus(errorStatus);
-            });
+        const projectPayload = JSON.stringify({ files, activeFile });
 
-        const params = {
-            source_code: body,
-            language: language,
-            input: input
-        };
-        API.post(`/api/runner/create`, params)
+        API.patch(`/api/room/${id}`, {
+            title,
+            body: projectPayload,
+            input,
+            language,
+            author_name: userName
+        }).catch(() => setSubmissionStatus(errorStatus));
+
+        API.post('/api/runner/create', {
+            source_code: activeCode,
+            language,
+            input,
+            files
+        })
             .then((res) => {
                 const { id: runnerId, status } = res.data;
                 setSubmissionId(runnerId);
@@ -215,144 +255,38 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
 
     useEffect(() => {
         if (submissionId) {
-            setSubmissionCheckerId(setInterval(() => updateSubmissionStatus(), 1000));
+            const interval = setInterval(() => {
+                API.get(`/api/runner/status?id=${encodeURIComponent(submissionId)}`).then((res) => {
+                    const { status } = res.data;
+                    if (status !== runningStatus) {
+                        clearInterval(interval);
+                        setSubmissionStatus(status);
+                        API.get(`/api/runner/details?id=${encodeURIComponent(submissionId)}`).then((det) => {
+                            const { stdout, stderr, build_stderr } = det.data;
+                            const combined =
+                                (build_stderr ? `[Compiler Error]\n${build_stderr}\n` : '') +
+                                (stdout || '') +
+                                (stderr ? `\n[Runtime Error]\n${stderr}` : '');
+                            setOutput(combined);
+                            socket.emit('setOutput', { value: combined, roomId: id });
+                        });
+                    }
+                });
+            }, 700);
+            return () => clearInterval(interval);
         }
-    }, [submissionId]);
+    }, [submissionId, id]);
 
-    const updateSubmissionStatus = () => {
-        API.get(`/api/runner/status?id=${encodeURIComponent(submissionId)}`).then((res) => {
-            const { status } = res.data;
-            setSubmissionStatus(status);
-        });
+    const fetchHistory = () => {
+        API.get(`/api/room/${id}/history`)
+            .then((res) => {
+                setHistoryList(res.data.data || []);
+                setShowHistory(true);
+            })
+            .catch(() => alert('Could not fetch room history'));
     };
 
-    const debouncedEmitUpdateBody = React.useMemo(
-        () =>
-            debounce((value: string, targetRoomId: string) => {
-                socket.emit('updateBody', { value, roomId: targetRoomId });
-            }, 30),
-        []
-    );
-
-    const debouncedEmitUpdateInput = React.useMemo(
-        () =>
-            debounce((value: string, targetRoomId: string) => {
-                socket.emit('updateInput', { value, roomId: targetRoomId });
-            }, 30),
-        []
-    );
-
-    const handleUpdateBody = (value: string) => {
-        setBody(value);
-        debouncedEmitUpdateBody(value, id);
-    };
-
-    const handleUpdateInput = (value: string) => {
-        setInput(value);
-        debouncedEmitUpdateInput(value, id);
-    };
-
-    const handleWidthChange = (x: number) => {
-        setWidthRight((100 - x).toString());
-        setWidthLeft(x.toString());
-    };
-
-    useEffect(() => {
-        localStorage.setItem('theme', theme);
-    }, [theme]);
-
-    useEffect(() => {
-        localStorage.setItem('language', language);
-    }, [language]);
-
-    useEffect(() => {
-        localStorage.setItem('fontSize', fontSize);
-    }, [fontSize]);
-
-    // Voice room stuff
-    const getAudioStream = () => {
-        const myNavigator =
-            navigator.mediaDevices.getUserMedia ||
-            // @ts-ignore
-            navigator.mediaDevices.webkitGetUserMedia ||
-            // @ts-ignore
-            navigator.mediaDevices.mozGetUserMedia ||
-            // @ts-ignore
-            navigator.mediaDevices.msGetUserMedia;
-        return myNavigator({ audio: true });
-    };
-
-    const createAudio = (data: { id: string; stream: MediaStream }) => {
-        const { id, stream } = data;
-        if (!audios[id]) {
-            const audio = document.createElement('audio');
-            audio.id = id;
-            audio.srcObject = stream;
-            if (myPeer && id == myPeer.id) {
-                myAudio = stream;
-                audio.muted = true;
-            }
-            audio.autoplay = true;
-            audios[id] = data;
-            console.log('Adding audio: ', id);
-        } // } else {
-        //     console.log('adding audio: ', id);
-        //     // @ts-ignore
-        //     document.getElementById(id).srcObject = stream;
-        // }
-    };
-
-    const removeAudio = (id: string) => {
-        delete audios[id];
-        const audio = document.getElementById(id);
-        if (audio) audio.remove();
-    };
-
-    const destroyConnection = () => {
-        console.log('distroying', audios, myPeer.id);
-        if (audios[myPeer.id]) {
-            const myMediaTracks = audios[myPeer.id].stream.getTracks();
-            myMediaTracks.forEach((track) => {
-                track.stop();
-            });
-        }
-        if (myPeer) myPeer.destroy();
-    };
-
-    const setPeersListeners = (stream: MediaStream) => {
-        myPeer.on('call', (call) => {
-            call.answer(stream);
-            call.on('stream', (userAudioStream) => {
-                createAudio({ id: call.metadata.id, stream: userAudioStream });
-            });
-            call.on('close', () => {
-                removeAudio(call.metadata.id);
-            });
-            call.on('error', () => {
-                console.log('peer error');
-                if (!myPeer.destroyed) removeAudio(call.metadata.id);
-            });
-            peers[call.metadata.id] = call;
-        });
-    };
-
-    const newUserConnection = (stream: MediaStream) => {
-        socket.on('userJoinedAudio', (userId) => {
-            const call = myPeer.call(userId, stream, { metadata: { id: myPeer.id } });
-            call.on('stream', (userAudioStream) => {
-                createAudio({ id: userId, stream: userAudioStream });
-            });
-            call.on('close', () => {
-                removeAudio(userId);
-            });
-            call.on('error', () => {
-                console.log('peer error');
-                if (!myPeer.destroyed) removeAudio(userId);
-            });
-            peers[userId] = call;
-        });
-    };
-
+    // Voice Room Logic
     useEffect(() => {
         if (inAudio) {
             const peerPort = window.location.port
@@ -367,189 +301,218 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                 path: '/peerjs',
                 secure: window.location.protocol === 'https:'
             });
-            myPeer.on('open', (userId) => {
-                console.log('opened');
-                getAudioStream().then((stream) => {
-                    socket.emit('joinAudioRoom', id, userId);
-                    stream.getAudioTracks()[0].enabled = !isMuted;
-                    newUserConnection(stream);
-                    setPeersListeners(stream);
-                    createAudio({ id: myPeer.id, stream });
-                });
-            });
-            myPeer.on('error', (err) => {
-                console.log('peerjs error: ', err);
-                if (!myPeer.destroyed) myPeer.reconnect();
-            });
-            socket.on('userLeftAudio', (userId) => {
-                console.log('user left aiudio:', userId);
-                if (peers[userId]) peers[userId].close();
-                removeAudio(userId);
-            });
-        } else {
-            console.log('leaving', myPeer);
-            if (myPeer) {
-                socket.emit('leaveAudioRoom', myPeer.id);
-                destroyConnection();
-            }
-            myAudio = null;
-        }
-    }, [inAudio]);
 
-    useEffect(() => {
-        if (inAudio) {
-            if (myAudio) {
-                myAudio.getAudioTracks()[0].enabled = !isMuted;
-            }
+            myPeer.on('open', (userId) => {
+                navigator.mediaDevices
+                    .getUserMedia({ audio: true, video: false })
+                    .then((stream) => {
+                        myAudio = stream;
+                        socket.emit('joinAudioRoom', id, userId);
+                    })
+                    .catch(() => alert('Microphone access denied'));
+            });
+
+            return () => {
+                if (myPeer) myPeer.destroy();
+                if (myAudio) myAudio.getTracks().forEach((t) => t.stop());
+            };
         }
-    }, [isMuted]);
+    }, [inAudio, id]);
 
     return (
-        <div>
-            <div className="row container-fluid text-center justify-content-center">
-                <div className="form-group col-lg-2 col-md-3">
-                    <label>Choose Language</label>
+        <div className="bg-dark text-white min-vh-100 d-flex flex-column">
+            {/* Top Toolbar */}
+            <div className="p-2 border-bottom border-secondary bg-black d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <div className="d-flex align-items-center gap-2">
+                    <h5 className="mb-0 text-primary fw-bold">Discode</h5>
+                    <span className="badge bg-secondary">{title || 'Collaborative Room'}</span>
+                    <PresenceRoster users={presenceUsers} currentUserId={socket.id} />
+                </div>
+
+                <div className="d-flex align-items-center gap-2 flex-wrap">
+                    {/* Language Selector */}
                     <select
-                        className="form-select"
-                        defaultValue={language}
-                        onChange={(event) => {
-                            setLanguage(event.target.value);
-                            socket.emit('setLanguage', {
-                                value: event.target.value,
-                                roomId: id
-                            });
+                        className="form-select form-select-sm bg-dark text-white border-secondary"
+                        style={{ width: '130px' }}
+                        value={language}
+                        onChange={(e) => {
+                            setLanguage(e.target.value);
+                            localStorage.setItem('language', e.target.value);
+                            socket.emit('setLanguage', { value: e.target.value, roomId: id });
                         }}
                     >
-                        {languages.map((lang, index) => {
-                            return (
-                                <option key={index} value={lang} selected={lang == language}>
-                                    {lang}
-                                </option>
-                            );
-                        })}
+                        {languages.map((l) => (
+                            <option key={l} value={l}>
+                                {l.toUpperCase()}
+                            </option>
+                        ))}
                     </select>
-                </div>
-                <div className="form-group col-lg-2 col-md-3">
-                    <label>Choose Theme</label>
+
+                    {/* Font Size */}
                     <select
-                        className="form-select"
-                        defaultValue={theme}
-                        onChange={(event) => setTheme(event.target.value)}
+                        className="form-select form-select-sm bg-dark text-white border-secondary"
+                        style={{ width: '80px' }}
+                        value={fontSize}
+                        onChange={(e) => setFontSize(Number(e.target.value))}
                     >
-                        {themes.map((theme, index) => {
-                            return (
-                                <option key={index} value={theme}>
-                                    {theme}
-                                </option>
-                            );
-                        })}
+                        {[12, 14, 16, 18, 20].map((s) => (
+                            <option key={s} value={s}>
+                                {s}px
+                            </option>
+                        ))}
                     </select>
-                </div>
-                <div className="form-group col-lg-2 col-md-3">
-                    <label>Font Size</label>
-                    <select
-                        className="form-select"
-                        defaultValue={fontSize}
-                        onChange={(event) => setFontSize(event.target.value)}
-                    >
-                        {fontSizes.map((fontSize, index) => {
-                            return (
-                                <option key={index} value={fontSize}>
-                                    {fontSize}
-                                </option>
-                            );
-                        })}
-                    </select>
-                </div>
-                <div className="form-group col-lg-2 col-md-3">
-                    <label>Your Handle</label>
+
+                    {/* Handle */}
                     <input
                         type="text"
-                        className="form-control"
                         value={userName}
                         onChange={(e) => {
                             setUserName(e.target.value);
                             localStorage.setItem('discode_username', e.target.value);
+                            socket.emit('user:join', {
+                                roomId: id,
+                                user: {
+                                    id: socket.id,
+                                    name: e.target.value,
+                                    color: userColor,
+                                    activeFile: activeFileRef.current
+                                }
+                            });
                         }}
+                        className="form-control form-control-sm bg-dark text-white border-secondary"
+                        style={{ width: '110px' }}
                         placeholder="Your name"
+                        title="Your collaborator display handle"
                     />
-                </div>
-                <div className="form-group col-lg-1 col-md-2">
-                    <br />
-                    <button className="btn btn-outline-info" onClick={fetchHistory} title="View 30-day code audit history">
+
+                    {/* Action Buttons */}
+                    <button className="btn btn-sm btn-outline-info" onClick={fetchHistory} title="View 30-day code audit history">
                         📜 History
                     </button>
-                </div>
-                <div className="form-group col-lg-2 col-md-2">
-                    <br />
-                    <button
-                        className="btn btn-secondary"
-                        onClick={() => {
-                            navigator.clipboard.writeText(window.location.href);
-                        }}
-                    >
-                        Copy room link
+
+                    <button className="btn btn-sm btn-outline-success" onClick={() => setShowExport(true)} title="Export workspace to ZIP or Gist">
+                        📦 Export
                     </button>
-                </div>
-                <div className="form-group col-lg-2 col-md-2">
-                    <br />
+
                     <button
-                        className={`btn btn-${inAudio ? 'primary' : 'secondary'}`}
+                        className="btn btn-sm btn-outline-secondary"
+                        onClick={() => navigator.clipboard.writeText(window.location.href)}
+                        title="Copy shareable room link"
+                    >
+                        🔗 Link
+                    </button>
+
+                    {/* Voice Room */}
+                    <button
+                        className={`btn btn-sm ${inAudio ? 'btn-danger' : 'btn-outline-primary'}`}
                         onClick={() => setInAudio(!inAudio)}
                     >
-                        {inAudio ? 'Leave Audio' : 'Join Audio'} Room
+                        {inAudio ? 'Leave Voice' : '🎙️ Join Voice'}
                     </button>
-                </div>
-                {inAudio ? (
-                    <div className="form-group col-lg-1 col-md-2">
-                        <br />
-                        <button
-                            className={`btn btn-${!isMuted ? 'primary' : 'secondary'}`}
-                            onClick={() => setIsMuted(!isMuted)}
-                        >
-                            {isMuted ? 'Muted' : 'Speaking'}
-                        </button>
-                    </div>
-                ) : (
-                    <div className="form-group col-lg-1 col-md-2" />
-                )}
 
-                <div className="form-group col-lg-1 col-md-2">
-                    <br />
-                    <label className="badge bg-dark mt-2 p-2">Status: {submissionStatus}</label>
+                    {/* Run Button */}
+                    <button
+                        className={`btn btn-sm ${submissionStatus === runningStatus ? 'btn-warning' : 'btn-primary'} fw-bold px-3`}
+                        onClick={handleSubmit}
+                        disabled={submissionStatus === runningStatus}
+                    >
+                        {submissionStatus === runningStatus ? '⏳ Running...' : '▶ Run Code'}
+                    </button>
                 </div>
             </div>
 
+            {/* Main Workspace Area */}
+            <div className="flex-grow-1 position-relative">
+                <SplitPane
+                    split="vertical"
+                    minSize={250}
+                    maxSize={windowWidth - 250}
+                    defaultSize={windowWidth * 0.65}
+                    style={{ height: 'calc(100vh - 58px)' }}
+                >
+                    {/* Left: Multi-File Code Editor */}
+                    <div className="d-flex flex-column h-100 p-2 bg-dark">
+                        <FileTree
+                            files={files}
+                            activeFile={activeFile}
+                            onSelectFile={handleSelectFile}
+                            onCreateFile={handleCreateFile}
+                            onDeleteFile={handleDeleteFile}
+                        />
+                        <div className="flex-grow-1 border border-secondary rounded overflow-hidden">
+                            <MonacoEditor
+                                language={language}
+                                theme="vs-dark"
+                                value={activeCode}
+                                onChange={handleCodeChange}
+                                onCursorChange={handleCursorChange}
+                                remoteCursors={Object.values(remoteCursors)}
+                                fontSize={fontSize}
+                            />
+                        </div>
+                    </div>
+
+                    {/* Right: I/O Console Panels */}
+                    <div className="d-flex flex-column h-100 p-2 bg-dark gap-2">
+                        {/* Stdin Panel */}
+                        <div className="d-flex flex-column" style={{ height: '35%' }}>
+                            <div className="d-flex justify-content-between align-items-center mb-1">
+                                <span className="fw-bold small text-muted">📥 Custom Input (stdin)</span>
+                            </div>
+                            <textarea
+                                className="form-control bg-black text-white border-secondary font-monospace flex-grow-1 small"
+                                style={{ resize: 'none' }}
+                                value={input}
+                                onChange={(e) => {
+                                    setInput(e.target.value);
+                                    socket.emit('updateInput', { value: e.target.value, roomId: id });
+                                }}
+                                placeholder="Enter custom inputs to be read by stdin..."
+                            />
+                        </div>
+
+                        {/* Stdout/Stderr Panel */}
+                        <div className="d-flex flex-column flex-grow-1">
+                            <div className="d-flex justify-content-between align-items-center mb-1">
+                                <span className="fw-bold small text-muted">📤 Execution Output (stdout / stderr)</span>
+                                <span className={`badge ${submissionStatus === completedStatus ? 'bg-success' : submissionStatus === errorStatus ? 'bg-danger' : 'bg-dark'}`}>
+                                    {submissionStatus}
+                                </span>
+                            </div>
+                            <pre className="p-2 bg-black text-light border border-secondary rounded font-monospace flex-grow-1 small overflow-auto mb-0" style={{ maxHeight: '100%' }}>
+                                <code>{output || 'Click "Run Code" to compile and execute locally.'}</code>
+                            </pre>
+                        </div>
+                    </div>
+                </SplitPane>
+            </div>
+
+            {/* Export Modal */}
+            {showExport && (
+                <ExportModal
+                    roomTitle={title}
+                    files={files}
+                    activeLanguage={language}
+                    onClose={() => setShowExport(false)}
+                />
+            )}
+
             {/* 30-Day Audit History Modal */}
             {showHistory && (
-                <div
-                    className="modal show d-block"
-                    tabIndex={-1}
-                    style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999 }}
-                >
+                <div className="modal show d-block" tabIndex={-1} style={{ backgroundColor: 'rgba(0,0,0,0.65)', zIndex: 9999 }}>
                     <div className="modal-dialog modal-lg modal-dialog-scrollable">
                         <div className="modal-content bg-dark text-white border-secondary">
                             <div className="modal-header border-secondary">
-                                <h5 className="modal-title">📜 Room Audit History (30-Day Traceability)</h5>
-                                <button
-                                    type="button"
-                                    className="btn-close btn-close-white"
-                                    onClick={() => setShowHistory(false)}
-                                />
+                                <h5 className="modal-title">📜 30-Day Code Attribution History</h5>
+                                <button type="button" className="btn-close btn-close-white" onClick={() => setShowHistory(false)} />
                             </div>
                             <div className="modal-body">
-                                <p className="text-muted small">
-                                    Every save and execution is logged with author attribution and stored with a 30-day retention period.
-                                </p>
                                 {historyList.length === 0 ? (
-                                    <p className="text-center py-4">No historical snapshots recorded yet for this room.</p>
+                                    <p className="text-center py-4 text-muted">No historical snapshots found for this room.</p>
                                 ) : (
                                     <div className="list-group">
-                                        {historyList.map((item, index) => (
-                                            <div
-                                                key={index}
-                                                className="list-group-item bg-black text-white border-secondary mb-2 rounded"
-                                            >
+                                        {historyList.map((item) => (
+                                            <div key={item.id} className="list-group-item bg-black text-white border-secondary mb-2 rounded">
                                                 <div className="d-flex justify-content-between align-items-center mb-1">
                                                     <div>
                                                         <span className="badge bg-primary me-2">👤 {item.author_name}</span>
@@ -560,19 +523,24 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                                                         {item.created_at ? new Date(item.created_at).toLocaleString() : 'Just now'}
                                                     </small>
                                                 </div>
-                                                <pre
-                                                    className="p-2 mt-2 bg-dark rounded small text-light"
-                                                    style={{ maxHeight: '150px', overflowY: 'auto' }}
-                                                >
+                                                <pre className="p-2 mt-2 bg-dark rounded small text-light" style={{ maxHeight: '120px', overflowY: 'auto' }}>
                                                     <code>{item.code_snapshot}</code>
                                                 </pre>
                                                 <button
                                                     className="btn btn-sm btn-outline-warning mt-1"
                                                     onClick={() => {
-                                                        if (window.confirm('Restore this code snapshot to the active editor?')) {
-                                                            setBody(item.code_snapshot);
-                                                            if (item.language) setLanguage(item.language);
-                                                            socket.emit('updateBody', { value: item.code_snapshot, roomId: id });
+                                                        if (window.confirm('Restore this snapshot to active workspace?')) {
+                                                            try {
+                                                                const parsed = JSON.parse(item.code_snapshot);
+                                                                if (parsed && parsed.files) {
+                                                                    setFiles(parsed.files);
+                                                                    setActiveFile(parsed.activeFile || Object.keys(parsed.files)[0]);
+                                                                } else {
+                                                                    setFiles({ [`main.${getExtension(item.language || 'python')}`]: item.code_snapshot });
+                                                                }
+                                                            } catch {
+                                                                setFiles({ [`main.${getExtension(item.language || 'python')}`]: item.code_snapshot });
+                                                            }
                                                             setShowHistory(false);
                                                         }
                                                     }}
@@ -593,80 +561,20 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                     </div>
                 </div>
             )}
-
-            <hr />
-            <SplitPane
-                split="vertical"
-                minSize={150}
-                maxSize={windowWidth - 150}
-                defaultSize={windowWidth / 2}
-                className="row text-center "
-                style={{ height: '78vh', width: '100vw', marginRight: '0' }}
-                onChange={handleWidthChange}
-            >
-                <div>
-                    <div className="row mb-1">
-                        <h5 className="col">Code Here</h5>
-
-                        <div className="form-group col">
-                            <button
-                                className="btn btn-secondary"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(body);
-                                }}
-                            >
-                                Copy Code
-                            </button>
-                        </div>
-                        <div className="form-group col">
-                            <button
-                                className="btn btn-primary"
-                                onClick={handleSubmit}
-                                disabled={submissionStatus === runningStatus}
-                            >
-                                Save and Run
-                            </button>
-                        </div>
-                    </div>
-                    <Editor
-                        name="code_editor"
-                        theme={theme}
-                        width={widthLeft}
-                        // @ts-ignore
-                        language={languageToEditorMode[language] || 'text'}
-                        body={body}
-                        setBody={handleUpdateBody}
-                        fontSize={fontSize}
-                    />
-                </div>
-                <div className="text-center">
-                    <h5>Input</h5>
-                    <Editor
-                        name="input_editor"
-                        theme={theme}
-                        language={'text'}
-                        body={input}
-                        setBody={handleUpdateInput}
-                        height={'35vh'}
-                        width={widthRight}
-                        fontSize={fontSize}
-                    />
-                    <h5>Output</h5>
-                    <Editor
-                        name="output_editor"
-                        theme={theme}
-                        language={'text'}
-                        body={output}
-                        setBody={setOutput}
-                        readOnly={true}
-                        height={'39vh'}
-                        width={widthRight}
-                        fontSize={fontSize}
-                    />
-                </div>
-            </SplitPane>
         </div>
     );
 };
+
+function getExtension(lang: string): string {
+    switch (lang.toLowerCase()) {
+        case 'python': return 'py';
+        case 'javascript': case 'js': return 'js';
+        case 'java': return 'java';
+        case 'go': case 'golang': return 'go';
+        case 'c': return 'c';
+        case 'cpp': case 'c_cpp': return 'cpp';
+        default: return 'txt';
+    }
+}
 
 export default withRouter(Room);
