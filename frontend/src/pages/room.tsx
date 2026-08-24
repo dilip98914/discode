@@ -9,7 +9,6 @@ import SplitPane from 'react-split-pane';
 import socket from './../utils/socket';
 import { baseURL } from '../config/config';
 import Peer from 'peerjs';
-import { diff_match_patch } from 'diff-match-patch';
 
 interface RoomProps {
     updatePreviousRooms: (room: string) => any;
@@ -67,8 +66,6 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
     const [inAudio, setInAudio] = useState<boolean>(false);
     const [isMuted, setIsMuted] = useState<boolean>(false);
 
-    const dmp = new diff_match_patch();
-
     useEffect(() => {
         socket.off('userjoined');
         socket.on('userjoined', () => {
@@ -77,25 +74,27 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
             socket.emit('setInput', { value: input, roomId: id });
             socket.emit('setOutput', { value: output, roomId: id });
         });
-    }, [body, language, input, output]);
+    }, [body, language, input, output, id]);
 
     useEffect(() => {
         socket.off('updateBody');
-        socket.on('updateBody', (patch) => {
-            const [newBody, res] = dmp.patch_apply(patch, body);
-            if (res[0]) setBody(newBody);
-            else console.log('Failed', body, patch);
+        socket.on('updateBody', (incomingBody: string) => {
+            setBody(incomingBody);
         });
-    }, [body]);
+        return () => {
+            socket.off('updateBody');
+        };
+    }, []);
 
     useEffect(() => {
         socket.off('updateInput');
-        socket.on('updateInput', (patch) => {
-            const [newInput, res] = dmp.patch_apply(patch, input);
-            if (res[0]) setInput(newInput);
-            else console.log('Failed', body, patch);
+        socket.on('updateInput', (incomingInput: string) => {
+            setInput(incomingInput);
         });
-    }, [input]);
+        return () => {
+            socket.off('updateInput');
+        };
+    }, []);
 
     useEffect(() => {
         const id = props.match.params.id;
@@ -159,12 +158,7 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
             clearInterval(submissionCheckerId);
             setSubmissionCheckerId(null);
 
-            const params = new URLSearchParams({
-                id: submissionId,
-                api_key: 'guest'
-            });
-            const querystring = params.toString();
-            API.get(`https://api.paiza.io/runners/get_details?${querystring}`).then((res) => {
+            API.get(`/api/runner/details?id=${encodeURIComponent(submissionId)}`).then((res) => {
                 const { stdout, stderr, build_stderr } = res.data;
                 console.log(res.data);
                 let output = '';
@@ -191,10 +185,9 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
         const params = {
             source_code: body,
             language: language,
-            input: input,
-            api_key: 'guest'
+            input: input
         };
-        API.post(`https://api.paiza.io/runners/create`, params)
+        API.post(`/api/runner/create`, params)
             .then((res) => {
                 const { id, status } = res.data;
                 setSubmissionId(id);
@@ -213,27 +206,36 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
     }, [submissionId]);
 
     const updateSubmissionStatus = () => {
-        const params = new URLSearchParams({
-            id: submissionId,
-            api_key: 'guest'
-        });
-        const querystring = params.toString();
-        API.get(`https://api.paiza.io/runners/get_status?${querystring}`).then((res) => {
+        API.get(`/api/runner/status?id=${encodeURIComponent(submissionId)}`).then((res) => {
             const { status } = res.data;
             setSubmissionStatus(status);
         });
     };
 
+    const debouncedEmitUpdateBody = React.useMemo(
+        () =>
+            debounce((value: string, targetRoomId: string) => {
+                socket.emit('updateBody', { value, roomId: targetRoomId });
+            }, 30),
+        []
+    );
+
+    const debouncedEmitUpdateInput = React.useMemo(
+        () =>
+            debounce((value: string, targetRoomId: string) => {
+                socket.emit('updateInput', { value, roomId: targetRoomId });
+            }, 30),
+        []
+    );
+
     const handleUpdateBody = (value: string) => {
-        const patch = dmp.patch_make(body, value);
         setBody(value);
-        debounce(() => socket.emit('updateBody', { value: patch, roomId: id }), 100)();
+        debouncedEmitUpdateBody(value, id);
     };
 
     const handleUpdateInput = (value: string) => {
-        const patch = dmp.patch_make(input, value);
         setInput(value);
-        debounce(() => socket.emit('updateInput', { value: patch, roomId: id }), 100)();
+        debouncedEmitUpdateInput(value, id);
     };
 
     const handleWidthChange = (x: number) => {
@@ -509,10 +511,11 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                         </div>
                     </div>
                     <Editor
+                        name="code_editor"
                         theme={theme}
                         width={widthLeft}
                         // @ts-ignore
-                        language={languageToEditorMode[language]}
+                        language={languageToEditorMode[language] || 'text'}
                         body={body}
                         setBody={handleUpdateBody}
                         fontSize={fontSize}
@@ -521,8 +524,9 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                 <div className="text-center">
                     <h5>Input</h5>
                     <Editor
+                        name="input_editor"
                         theme={theme}
-                        language={''}
+                        language={'text'}
                         body={input}
                         setBody={handleUpdateInput}
                         height={'35vh'}
@@ -531,8 +535,9 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                     />
                     <h5>Output</h5>
                     <Editor
+                        name="output_editor"
                         theme={theme}
-                        language={''}
+                        language={'text'}
                         body={output}
                         setBody={setOutput}
                         readOnly={true}

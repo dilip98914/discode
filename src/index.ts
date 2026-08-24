@@ -5,7 +5,7 @@ import cors from 'cors';
 import http from 'http';
 import path from 'path';
 
-let PORT = 8080;
+const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 8080;
 const app = express();
 app.set('port', PORT);
 
@@ -17,18 +17,28 @@ app.use(express.json());
 app.use(
     cors({
         allowedHeaders: ['Content-Type'],
-        origin: ['http://localhost:3000']
+        origin: '*'
     })
 );
 
 // Routes
 app.use('/api/room', require('./routes/room.routes'));
+app.use('/api/runner', require('./routes/runner.routes'));
+
+// Static files in production
+if (process.env.NODE_ENV === 'production') {
+    console.log('Environment is production, serving static frontend/build');
+    app.use(express.static(path.resolve(__dirname, '..', 'frontend', 'build')));
+    app.get('*', (req, res) => {
+        res.sendFile(path.resolve(__dirname, '..', 'frontend', 'build', 'index.html'));
+    });
+}
 
 // Socket.io
 import { Server, Socket } from 'socket.io';
 const io = new Server(server, {
     cors: {
-        origin: 'http://localhost:3000'
+        origin: '*'
     }
 });
 
@@ -73,13 +83,3 @@ io.on('connection', (socket) => {
 server.listen(PORT, () => {
     console.log(`Server listening on port: ${PORT}`);
 });
-
-if (process.env.NODE_ENV === 'production') {
-    PORT = process.env.PORT as unknown as number;
-    console.log('env is prod');
-    app.use(express.static('frontend/build'));
-    app.get('*', (req, res) => {
-        console.log('req: ', req.url);
-        res.sendFile(path.resolve(__dirname, '..', 'frontend', 'build', 'index.html'));
-    });
-}

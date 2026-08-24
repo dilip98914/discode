@@ -13,4 +13,4 @@ RUN curl -fsSL -o /usr/local/bin/dbmate https://github.com/amacneil/dbmate/relea
 RUN chmod +x /usr/local/bin/dbmate
 WORKDIR /usr/src/discode
 
-CMD npm start
+CMD ["sh", "-c", "dbmate wait && dbmate migrate && npm start"]
