@@ -32,10 +32,10 @@ import 'ace-builds/src-noconflict/theme-xcode';
 import 'ace-builds/src-noconflict/theme-ambiance';
 import 'ace-builds/src-noconflict/theme-solarized_light';
 
-// Explicitly set Ace basePath to prevent 'Unable to infer path' warning and 404 HTML fallback
-ace.config.set('basePath', 'https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/');
-ace.config.set('modePath', 'https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/');
-ace.config.set('themePath', 'https://cdn.jsdelivr.net/npm/ace-builds@1.4.12/src-noconflict/');
+// Set Ace paths to local root to eliminate any external CDN network calls
+ace.config.set('basePath', '/');
+ace.config.set('modePath', '/');
+ace.config.set('themePath', '/');
 
 interface EditorProps {
     language: string;

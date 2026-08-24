@@ -1,80 +1,49 @@
 ﻿import express from 'express';
-import https from 'https';
-import { sendSuccess, sendError } from '../utils';
+import { executeCodeLocal } from '../runner/localRunner';
 
 const router = express.Router();
-
-function httpRequest(url: string, method: string, data?: any): Promise<any> {
-    return new Promise((resolve, reject) => {
-        const parsedUrl = new URL(url);
-        const postData = data ? JSON.stringify(data) : null;
-
-        const options: https.RequestOptions = {
-            hostname: parsedUrl.hostname,
-            port: parsedUrl.port || 443,
-            path: parsedUrl.pathname + parsedUrl.search,
-            method: method,
-            headers: {
-                'Content-Type': 'application/json',
-                ...(postData ? { 'Content-Length': Buffer.byteLength(postData) } : {})
-            }
-        };
-
-        const req = https.request(options, (res) => {
-            let body = '';
-            res.on('data', (chunk) => (body += chunk));
-            res.on('end', () => {
-                try {
-                    const json = JSON.parse(body);
-                    resolve(json);
-                } catch (e) {
-                    resolve({ raw: body });
-                }
-            });
-        });
-
-        req.on('error', (err) => reject(err));
-        if (postData) req.write(postData);
-        req.end();
-    });
-}
+const jobStore: { [id: string]: any } = {};
 
 router.post('/create', async (req, res) => {
     try {
         const { source_code, language, input } = req.body;
-        const payload = {
-            source_code: source_code || '',
-            language: language || 'c',
-            input: input || '',
-            api_key: 'guest'
-        };
-        const data = await httpRequest('https://api.paiza.io/runners/create', 'POST', payload);
-        res.json(data);
+        const result = await executeCodeLocal({ source_code, language, input });
+        jobStore[result.id] = result;
+
+        // Auto-cleanup job after 5 minutes
+        setTimeout(() => {
+            delete jobStore[result.id];
+        }, 300000);
+
+        res.json({ id: result.id, status: result.status });
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
 });
 
-router.get('/status', async (req, res) => {
-    try {
-        const id = req.query.id as string;
-        if (!id) return res.status(400).json({ error: 'id is required' });
-        const data = await httpRequest(`https://api.paiza.io/runners/get_status?id=${encodeURIComponent(id)}&api_key=guest`, 'GET');
-        res.json(data);
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
+router.get('/status', (req, res) => {
+    const id = req.query.id as string;
+    const job = jobStore[id];
+    if (!job) {
+        return res.json({ id, status: 'completed' });
     }
+    res.json({ id, status: job.status });
 });
 
-router.get('/details', async (req, res) => {
-    try {
-        const id = req.query.id as string;
-        if (!id) return res.status(400).json({ error: 'id is required' });
-        const data = await httpRequest(`https://api.paiza.io/runners/get_details?id=${encodeURIComponent(id)}&api_key=guest`, 'GET');
-        res.json(data);
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
+router.get('/details', (req, res) => {
+    const id = req.query.id as string;
+    const job = jobStore[id];
+    if (!job) {
+        return res.json({ id, stdout: '', stderr: 'Execution output not found or expired', status: 'error' });
     }
+    res.json({
+        id: job.id,
+        status: job.status,
+        stdout: job.stdout,
+        stderr: job.stderr,
+        build_stderr: job.build_stderr || '',
+        time: job.time
+    });
 });
 
 export = router;

@@ -53,6 +53,12 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
     const [theme, setTheme] = useState<string>(localStorage.getItem('theme') ?? 'monokai');
     const [fontSize, setFontSize] = useState<string>(localStorage.getItem('fontSize') ?? '12');
 
+    const [userName, setUserName] = useState<string>(
+        localStorage.getItem('discode_username') || 'Developer'
+    );
+    const [showHistory, setShowHistory] = useState<boolean>(false);
+    const [historyList, setHistoryList] = useState<any[]>([]);
+
     const idleStatus = 'Idle';
     const runningStatus = 'running';
     const compeletedStatus = 'completed';
@@ -171,15 +177,23 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
         }
     }, [submissionStatus]);
 
+    const fetchHistory = () => {
+        API.get(`/api/room/${id}/history`)
+            .then((res) => {
+                setHistoryList(res.data.data || []);
+                setShowHistory(true);
+            })
+            .catch(() => alert('Could not fetch room audit history'));
+    };
+
     const handleSubmit = () => {
         if (submissionStatus === runningStatus) return;
         setSubmissionStatus(runningStatus);
 
-        API.patch(`/api/room/${id}`, { title, body, input, language })
-            .then()
-            .catch((err) => {
+        API.patch(`/api/room/${id}`, { title, body, input, language, author_name: userName })
+            .then(() => {})
+            .catch(() => {
                 setSubmissionStatus(errorStatus);
-                return;
             });
 
         const params = {
@@ -189,11 +203,11 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
         };
         API.post(`/api/runner/create`, params)
             .then((res) => {
-                const { id, status } = res.data;
-                setSubmissionId(id);
+                const { id: runnerId, status } = res.data;
+                setSubmissionId(runnerId);
                 setSubmissionStatus(status);
             })
-            .catch((err) => {
+            .catch(() => {
                 setSubmissionId('');
                 setSubmissionStatus(errorStatus);
             });
@@ -341,7 +355,18 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
 
     useEffect(() => {
         if (inAudio) {
-            myPeer = new Peer();
+            const peerPort = window.location.port
+                ? parseInt(window.location.port, 10)
+                : window.location.protocol === 'https:'
+                ? 443
+                : 80;
+
+            myPeer = new Peer({
+                host: window.location.hostname,
+                port: peerPort,
+                path: '/peerjs',
+                secure: window.location.protocol === 'https:'
+            });
             myPeer.on('open', (userId) => {
                 console.log('opened');
                 getAudioStream().then((stream) => {
@@ -437,6 +462,25 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
                     </select>
                 </div>
                 <div className="form-group col-lg-2 col-md-3">
+                    <label>Your Handle</label>
+                    <input
+                        type="text"
+                        className="form-control"
+                        value={userName}
+                        onChange={(e) => {
+                            setUserName(e.target.value);
+                            localStorage.setItem('discode_username', e.target.value);
+                        }}
+                        placeholder="Your name"
+                    />
+                </div>
+                <div className="form-group col-lg-1 col-md-2">
+                    <br />
+                    <button className="btn btn-outline-info" onClick={fetchHistory} title="View 30-day code audit history">
+                        📜 History
+                    </button>
+                </div>
+                <div className="form-group col-lg-2 col-md-2">
                     <br />
                     <button
                         className="btn btn-secondary"
@@ -472,9 +516,83 @@ const Room: React.FC<RouteComponentProps<any> & RoomProps> = (props) => {
 
                 <div className="form-group col-lg-1 col-md-2">
                     <br />
-                    <label>Status: {submissionStatus}</label>
+                    <label className="badge bg-dark mt-2 p-2">Status: {submissionStatus}</label>
                 </div>
             </div>
+
+            {/* 30-Day Audit History Modal */}
+            {showHistory && (
+                <div
+                    className="modal show d-block"
+                    tabIndex={-1}
+                    style={{ backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 9999 }}
+                >
+                    <div className="modal-dialog modal-lg modal-dialog-scrollable">
+                        <div className="modal-content bg-dark text-white border-secondary">
+                            <div className="modal-header border-secondary">
+                                <h5 className="modal-title">📜 Room Audit History (30-Day Traceability)</h5>
+                                <button
+                                    type="button"
+                                    className="btn-close btn-close-white"
+                                    onClick={() => setShowHistory(false)}
+                                />
+                            </div>
+                            <div className="modal-body">
+                                <p className="text-muted small">
+                                    Every save and execution is logged with author attribution and stored with a 30-day retention period.
+                                </p>
+                                {historyList.length === 0 ? (
+                                    <p className="text-center py-4">No historical snapshots recorded yet for this room.</p>
+                                ) : (
+                                    <div className="list-group">
+                                        {historyList.map((item, index) => (
+                                            <div
+                                                key={index}
+                                                className="list-group-item bg-black text-white border-secondary mb-2 rounded"
+                                            >
+                                                <div className="d-flex justify-content-between align-items-center mb-1">
+                                                    <div>
+                                                        <span className="badge bg-primary me-2">👤 {item.author_name}</span>
+                                                        <span className="badge bg-secondary me-2">{item.action}</span>
+                                                        <span className="badge bg-dark border border-secondary">{item.language}</span>
+                                                    </div>
+                                                    <small className="text-muted">
+                                                        {item.created_at ? new Date(item.created_at).toLocaleString() : 'Just now'}
+                                                    </small>
+                                                </div>
+                                                <pre
+                                                    className="p-2 mt-2 bg-dark rounded small text-light"
+                                                    style={{ maxHeight: '150px', overflowY: 'auto' }}
+                                                >
+                                                    <code>{item.code_snapshot}</code>
+                                                </pre>
+                                                <button
+                                                    className="btn btn-sm btn-outline-warning mt-1"
+                                                    onClick={() => {
+                                                        if (window.confirm('Restore this code snapshot to the active editor?')) {
+                                                            setBody(item.code_snapshot);
+                                                            if (item.language) setLanguage(item.language);
+                                                            socket.emit('updateBody', { value: item.code_snapshot, roomId: id });
+                                                            setShowHistory(false);
+                                                        }
+                                                    }}
+                                                >
+                                                    Restore Snapshot
+                                                </button>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="modal-footer border-secondary">
+                                <button type="button" className="btn btn-secondary" onClick={() => setShowHistory(false)}>
+                                    Close
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
 
             <hr />
             <SplitPane

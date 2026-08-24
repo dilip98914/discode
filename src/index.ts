@@ -25,6 +25,19 @@ app.use(
 app.use('/api/room', require('./routes/room.routes'));
 app.use('/api/runner', require('./routes/runner.routes'));
 
+// Self-Hosted PeerServer (WebRTC Signaling)
+import { ExpressPeerServer } from 'peer';
+import CodeHistory from './models/history.model';
+
+const peerServer = ExpressPeerServer(server, {
+    path: '/'
+});
+app.use('/peerjs', peerServer);
+
+// Run 30-day TTL cleanup every 24h & on startup
+setTimeout(() => CodeHistory.cleanupExpired(), 5000);
+setInterval(() => CodeHistory.cleanupExpired(), 24 * 60 * 60 * 1000);
+
 // Static files in production
 if (process.env.NODE_ENV === 'production') {
     console.log('Environment is production, serving static frontend/build');
